@@ -3,108 +3,65 @@ from streamlit_option_menu import option_menu
 from streamlit_extras.card import card
 from streamlit_extras.metric_cards import style_metric_cards
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import plotly.express as px
-import io
-import base64
-from io import BytesIO
-from openpyxl import Workbook
 import plotly.graph_objects as go
 import json
 import plotly
 import plotly.io as pio
 from plotly.colors import n_colors
+import io
+import base64
+from io import BytesIO
+from openpyxl import Workbook
 from statsmodels.tsa.seasonal import seasonal_decompose
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
-# 设置中文字体
-plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']  # 指定默认字体为微软雅黑
-plt.rcParams['axes.unicode_minus'] = False  # 解决保存图像是负号'-'显示为方块的问题
+# 设置页面配置
+st.set_page_config(layout="wide", page_title="数据分析工具", page_icon="📊")
 
 # 添加自定义CSS样式
 def local_css(file_name):
     with open(file_name, "r", encoding="utf-8") as f:
         st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
-# 创建卡片组件
-def create_card(title, content):
-    card_html = f"""
-    <div class="card">
-        <h3>{title}</h3>
-        <p>{content}</p>
-    </div>
-    """
-    return st.markdown(card_html, unsafe_allow_html=True)
+local_css("style.css")
 
+# 读取文件函数
 def read_file(file):
-    file_extension = file.name.split('.')[-1].lower()
-    if file_extension == 'csv':
-        try:
-            return pd.read_csv(file, encoding='utf-8')
-        except UnicodeDecodeError:
-            return pd.read_csv(file, encoding='gb18030')
-    elif file_extension == 'xlsx' or file_extension == 'xls':
-        return pd.read_excel(file)
-    elif file_extension == 'json':
-        return pd.read_json(file)
-    else:
-        st.error(f"不支持的文件格式：{file_extension}")
+    try:
+        file_extension = file.name.split('.')[-1].lower()
+        if file_extension == 'csv':
+            data = pd.read_csv(file)
+        elif file_extension in ['xlsx', 'xls']:
+            data = pd.read_excel(file)
+        elif file_extension == 'json':
+            data = pd.read_json(file)
+        else:
+            st.error(f"不支持的文件格式：{file_extension}")
+            return None
+        
+        # 自动检测并转换日期时间列
+        for col in data.columns:
+            if data[col].dtype == 'object':
+                try:
+                    data[col] = pd.to_datetime(data[col])
+                except:
+                    pass
+        
+        return data
+    except Exception as e:
+        st.error(f"读取文件时出错：{str(e)}")
         return None
 
-# 添加一个函数来创建可下载的图表链接
-def get_image_download_link(fig, filename, text):
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
-    buf.seek(0)
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    href = f'<a href="data:image/png;base64,{b64}" download="{filename}">{text}</a>'
-    return href
-
+# 主函数
 def main():
-    st.set_page_config(layout="wide", page_title="数据分析工具", page_icon="📊")
-    local_css("style.css")
-    
-    # 自定义主题
-    theme = st.sidebar.selectbox("选择主题", ["默认", "深色", "浅色"])
-    if theme == "深色":
-        st.markdown("""
-        <style>
-        .stApp {
-            background-color: #1c1c1e;
-            color: #ffffff;
-        }
-        .card {
-            background: rgba(44, 44, 46, 0.7);
-        }
-        h1, h2, h3 {
-            color: #ffffff;
-        }
-        .stButton > button {
-            background-color: #0A84FF;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-    elif theme == "浅色":
-        st.markdown("""
-        <style>
-        .stApp {
-            background-color: #f2f2f7;
-            color: #000000;
-        }
-        .card {
-            background: rgba(255, 255, 255, 0.7);
-        }
-        </style>
-        """, unsafe_allow_html=True)
-    
     # 侧边栏导航
     with st.sidebar:
         selected = option_menu(
             menu_title="主菜单",
-            options=["数据概览", "数据清洗", "数据分析", "可视化", "高级分析"],
-            icons=["table", "tools", "bar-chart", "graph-up", "gear-fill"],
+            options=["数据概览", "数据清洗", "数据分析", "可视化", "高级分析", "使用说明"],
+            icons=["table", "tools", "bar-chart", "graph-up", "gear-fill", "question-circle"],
             menu_icon="cast",
             default_index=0,
         )
@@ -120,7 +77,10 @@ def main():
         data_visualization()
     elif selected == "高级分析":
         advanced_analysis()
+    elif selected == "使用说明":
+        show_instructions()
 
+# 数据概览函数
 def data_overview():
     st.title("数据概览")
     uploaded_file = st.file_uploader("选择文件", type=["csv", "xlsx", "xls", "json"])
@@ -129,6 +89,7 @@ def data_overview():
         data = read_file(uploaded_file)
         if data is not None:
             st.success("文件读取成功")
+            st.session_state['data'] = data
             
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -139,13 +100,6 @@ def data_overview():
                 st.metric("缺失值数", data.isnull().sum().sum())
             
             style_metric_cards()
-            
-            # 数据过滤器
-            st.subheader("数据过滤")
-            filter_column = st.selectbox("选择过滤列", data.columns)
-            filter_value = st.text_input("输入过滤值")
-            if filter_value:
-                data = data[data[filter_column].astype(str).str.contains(filter_value, case=False)]
             
             st.subheader("数据预览")
             st.dataframe(data.head())
@@ -168,9 +122,8 @@ def data_overview():
                     b64 = base64.b64encode(towrite.read()).decode()
                     href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="exported_data.xlsx">下载 Excel 文件</a>'
                 st.markdown(href, unsafe_allow_html=True)
-            
-            st.session_state['data'] = data
 
+# 数据清洗函数
 def data_cleaning():
     st.title("数据清洗")
     if 'data' not in st.session_state:
@@ -208,6 +161,7 @@ def data_cleaning():
         st.session_state['data'] = edited_df
         st.success("数据编辑已保存")
 
+# 数据分析函数
 def data_analysis():
     st.title("数据分析")
     if 'data' not in st.session_state:
@@ -225,9 +179,11 @@ def data_analysis():
         st.warning("数据集中数值列不足两列，无法进行相关性分析。")
     else:
         corr_matrix = data[numeric_columns].corr()
-        fig = px.imshow(corr_matrix, text_auto=True, aspect="auto")
+        fig = px.imshow(corr_matrix, text_auto=True, aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, labels=dict(color="相关系数"))
+        fig.update_traces(text=corr_matrix.round(2), texttemplate="%{text}")
         st.plotly_chart(fig, use_container_width=True)
 
+# 数据可视化函数
 def data_visualization():
     st.title("数据可视化")
     if 'data' not in st.session_state:
@@ -352,6 +308,7 @@ def data_visualization():
     或者，您可以使用Python的Plotly库来加载和显示这个JSON文件。
     """)
 
+# 高级分析函数
 def advanced_analysis():
     st.title("高级分析")
     if 'data' not in st.session_state:
@@ -373,6 +330,19 @@ def advanced_analysis():
     
     fig = px.bar(grouped_data, x=group_column, y=agg_column, title=f"{group_column} 分组的 {agg_column} {agg_function}")
     st.plotly_chart(fig, use_container_width=True)
+
+# 使用说明函数
+def show_instructions():
+    st.title("使用说明")
+    st.markdown("""
+    1. **数据导入**：在"数据概览"页面上传您的 CSV、Excel 或 JSON 文件。
+    2. **数据清洗**：使用"数据清洗"页面处理缺失值和删除重复行。
+    3. **数据分析**：在"数据分析"页面查看描述性统计和相关性分析。
+    4. **数据可视化**：使用"可视化"页面创建各种图表。
+    5. **高级分析**：在"高级分析"页面进行更深入的数据探索。
+    
+    如需更多帮助，请参阅 [GitHub 仓库](https://github.com/yourusername/data-analysis-tool)。
+    """)
 
 if __name__ == '__main__':
     main()
