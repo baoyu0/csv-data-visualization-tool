@@ -8,6 +8,13 @@ import seaborn as sns
 import plotly.express as px
 import io
 import base64
+from io import BytesIO
+from openpyxl import Workbook
+import plotly.graph_objects as go
+import json
+import plotly
+import plotly.io as pio
+from plotly.colors import n_colors
 
 # 设置中文字体
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']  # 指定默认字体为微软雅黑
@@ -54,6 +61,40 @@ def get_image_download_link(fig, filename, text):
 
 def main():
     st.set_page_config(layout="wide", page_title="数据分析工具", page_icon="📊")
+    local_css("style.css")
+    
+    # 自定义主题
+    theme = st.sidebar.selectbox("选择主题", ["默认", "深色", "浅色"])
+    if theme == "深色":
+        st.markdown("""
+        <style>
+        .stApp {
+            background-color: #1c1c1e;
+            color: #ffffff;
+        }
+        .card {
+            background: rgba(44, 44, 46, 0.7);
+        }
+        h1, h2, h3 {
+            color: #ffffff;
+        }
+        .stButton > button {
+            background-color: #0A84FF;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+    elif theme == "浅色":
+        st.markdown("""
+        <style>
+        .stApp {
+            background-color: #f2f2f7;
+            color: #000000;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.7);
+        }
+        </style>
+        """, unsafe_allow_html=True)
     
     # 侧边栏导航
     with st.sidebar:
@@ -96,11 +137,34 @@ def data_overview():
             
             style_metric_cards()
             
+            # 数据过滤器
+            st.subheader("数据过滤")
+            filter_column = st.selectbox("选择过滤列", data.columns)
+            filter_value = st.text_input("输入过滤值")
+            if filter_value:
+                data = data[data[filter_column].astype(str).str.contains(filter_value, case=False)]
+            
             st.subheader("数据预览")
             st.dataframe(data.head())
             
             st.subheader("数据类型")
             st.dataframe(data.dtypes)
+            
+            # 数据导出
+            st.subheader("数据导出")
+            export_format = st.radio("选择导出格式", ["CSV", "Excel"])
+            if st.button("导出数据"):
+                if export_format == "CSV":
+                    csv = data.to_csv(index=False)
+                    b64 = base64.b64encode(csv.encode()).decode()
+                    href = f'<a href="data:file/csv;base64,{b64}" download="exported_data.csv">下载 CSV 文件</a>'
+                else:
+                    towrite = BytesIO()
+                    data.to_excel(towrite, index=False, engine="openpyxl")
+                    towrite.seek(0)
+                    b64 = base64.b64encode(towrite.read()).decode()
+                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="exported_data.xlsx">下载 Excel 文件</a>'
+                st.markdown(href, unsafe_allow_html=True)
             
             st.session_state['data'] = data
 
@@ -133,6 +197,13 @@ def data_cleaning():
     
     st.session_state['data'] = data
     st.success("数据清洗完成")
+    
+    # 添加交互式数据编辑功能
+    st.subheader("交互式数据编辑")
+    edited_df = st.data_editor(st.session_state['data'])
+    if st.button("保存编辑"):
+        st.session_state['data'] = edited_df
+        st.success("数据编辑已保存")
 
 def data_analysis():
     st.title("数据分析")
@@ -147,9 +218,12 @@ def data_analysis():
     
     st.subheader("相关性分析")
     numeric_columns = data.select_dtypes(include=['float64', 'int64']).columns
-    corr_matrix = data[numeric_columns].corr()
-    fig = px.imshow(corr_matrix, text_auto=True, aspect="auto")
-    st.plotly_chart(fig, use_container_width=True)
+    if len(numeric_columns) < 2:
+        st.warning("数据集中数值列不足两列，无法进行相关性分析。")
+    else:
+        corr_matrix = data[numeric_columns].corr()
+        fig = px.imshow(corr_matrix, text_auto=True, aspect="auto")
+        st.plotly_chart(fig, use_container_width=True)
 
 def data_visualization():
     st.title("数据可视化")
@@ -159,35 +233,106 @@ def data_visualization():
     
     data = st.session_state['data']
     
-    chart_type = st.selectbox("选择图表类型", ["散点图", "线图", "柱状图", "箱线图", "直方图", "饼图"])
+    # 设置统一的主题
+    pio.templates.default = "plotly_white"
+    
+    chart_type = st.selectbox("选择图表类型", ["散点图", "线图", "柱状图", "箱线图", "直方图", "饼图", "热力图"])
     
     numeric_columns = data.select_dtypes(include=['float64', 'int64']).columns
     categorical_columns = data.select_dtypes(include=['object']).columns
     
+    if len(numeric_columns) == 0:
+        st.warning("数据集中没有数值列，无法进行可视化。")
+        return
+    
+    # 定义现代科技感的颜色方案
+    color_scheme = n_colors('rgb(0, 122, 255)', 'rgb(10, 132, 255)', 6, colortype='rgb')
+
+    x_column = None
+    y_column = None
+    column = None
+
     if chart_type in ["散点图", "线图", "柱状图"]:
         x_column = st.selectbox("选择X轴", data.columns)
         y_column = st.selectbox("选择Y轴", numeric_columns)
         color_column = st.selectbox("选择颜色列（可选）", ["无"] + list(categorical_columns))
         
         if chart_type == "散点图":
-            fig = px.scatter(data, x=x_column, y=y_column, color=color_column if color_column != "无" else None)
+            fig = px.scatter(data, x=x_column, y=y_column, color=color_column if color_column != "无" else None,
+                             color_discrete_sequence=color_scheme)
         elif chart_type == "线图":
-            fig = px.line(data, x=x_column, y=y_column, color=color_column if color_column != "无" else None)
+            fig = px.line(data, x=x_column, y=y_column, color=color_column if color_column != "无" else None,
+                          color_discrete_sequence=color_scheme)
         else:  # 柱状图
-            fig = px.bar(data, x=x_column, y=y_column, color=color_column if color_column != "无" else None)
+            fig = px.bar(data, x=x_column, y=y_column, color=color_column if color_column != "无" else None,
+                         color_discrete_sequence=color_scheme)
     
     elif chart_type in ["箱线图", "直方图"]:
         column = st.selectbox("选择列", numeric_columns)
         if chart_type == "箱线图":
-            fig = px.box(data, y=column)
+            fig = px.box(data, y=column, color_discrete_sequence=color_scheme)
         else:  # 直方图
-            fig = px.histogram(data, x=column)
+            fig = px.histogram(data, x=column, color_discrete_sequence=color_scheme)
     
-    else:  # 饼图
+    elif chart_type == "饼图":
+        if len(categorical_columns) == 0:
+            st.warning("数据集中没有分类列，无法创建饼图。")
+            return
         column = st.selectbox("选择列", categorical_columns)
-        fig = px.pie(data, names=column, values=data[column].value_counts())
+        value_counts = data[column].value_counts()
+        fig = px.pie(values=value_counts.values, names=value_counts.index, title=f'{column} 的分布',
+                     color_discrete_sequence=color_scheme)
     
-    st.plotly_chart(fig, use_container_width=True)
+    elif chart_type == "热力图":
+        if len(numeric_columns) < 2:
+            st.warning("数据集中数值列不足两列，无法创建热力图。")
+            return
+        corr_matrix = data[numeric_columns].corr()
+        fig = px.imshow(corr_matrix, text_auto=True, aspect="auto", color_continuous_scale='Viridis', zmin=-1, zmax=1, labels=dict(color="相关系数"))
+    
+    # 更新图表布局
+    fig.update_layout(
+        title={
+            'text': f"{chart_type.capitalize()} - {y_column if chart_type in ['散点图', '线图', '柱状图'] else column if column else ''}",
+            'y':0.95,
+            'x':0.5,
+            'xanchor': 'center',
+            'yanchor': 'top',
+            'font': dict(size=24, color='#1D3557')
+        },
+        xaxis_title=x_column if chart_type in ["散点图", "线图", "柱状图"] else column if column else '',
+        yaxis_title=y_column if chart_type in ["散点图", "线图", "柱状图"] else "频率" if chart_type != "热力图" else '',
+        legend_title="图例",
+        font=dict(family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif", size=14),
+        hovermode="closest",
+        plot_bgcolor='rgba(240, 240, 244, 0.8)',
+        paper_bgcolor='rgba(240, 240, 244, 0.8)',
+        xaxis=dict(showgrid=True, gridcolor='rgba(0, 122, 255, 0.1)'),
+        yaxis=dict(showgrid=True, gridcolor='rgba(0, 122, 255, 0.1)')
+    )
+    
+    # 创建小图用于UI展示
+    fig_small = go.Figure(fig)
+    fig_small.update_layout(width=700, height=500)
+    st.plotly_chart(fig_small, use_container_width=True)
+    
+    # 创建下载链接
+    fig_large = go.Figure(fig)
+    fig_large.update_layout(width=1200, height=800)
+    
+    # 将Plotly图表转换为JSON
+    fig_json = json.dumps(fig_large, cls=plotly.utils.PlotlyJSONEncoder)
+    
+    # 创建下载链接
+    b64 = base64.b64encode(fig_json.encode()).decode()
+    href = f'<a href="data:application/json;base64,{b64}" download="chart.json">下载图表数据 (JSON格式)</a>'
+    st.markdown(href, unsafe_allow_html=True)
+    
+    # 添加说明
+    st.markdown("""
+    下载的JSON文件可以在 [Plotly Chart Studio](https://chart-studio.plotly.com/create/) 中导入以查看和编辑图表。
+    或者，您可以使用Python的Plotly库来加载和显示这个JSON文件。
+    """)
 
 def advanced_analysis():
     st.title("高级分析")
