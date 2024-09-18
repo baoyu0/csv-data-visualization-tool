@@ -1,17 +1,32 @@
 import streamlit as st
+from streamlit_option_menu import option_menu
+from streamlit_extras.card import card
+from streamlit_extras.metric_cards import style_metric_cards
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os
+import plotly.express as px
 import io
-from matplotlib import font_manager
-import numpy as np
-from scipy import stats
-import openpyxl  # 用于读取Excel文件
+import base64
 
 # 设置中文字体
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']  # 指定默认字体为微软雅黑
 plt.rcParams['axes.unicode_minus'] = False  # 解决保存图像是负号'-'显示为方块的问题
+
+# 添加自定义CSS样式
+def local_css(file_name):
+    with open(file_name, "r", encoding="utf-8") as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+
+# 创建卡片组件
+def create_card(title, content):
+    card_html = f"""
+    <div class="card">
+        <h3>{title}</h3>
+        <p>{content}</p>
+    </div>
+    """
+    return st.markdown(card_html, unsafe_allow_html=True)
 
 def read_file(file):
     file_extension = file.name.split('.')[-1].lower()
@@ -28,163 +43,173 @@ def read_file(file):
         st.error(f"不支持的文件格式：{file_extension}")
         return None
 
+# 添加一个函数来创建可下载的图表链接
+def get_image_download_link(fig, filename, text):
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
+    buf.seek(0)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    href = f'<a href="data:image/png;base64,{b64}" download="{filename}">{text}</a>'
+    return href
+
 def main():
-    st.title('数据可视化和分析工具')
+    st.set_page_config(layout="wide", page_title="数据分析工具", page_icon="📊")
     
+    # 侧边栏导航
+    with st.sidebar:
+        selected = option_menu(
+            menu_title="主菜单",
+            options=["数据概览", "数据清洗", "数据分析", "可视化", "高级分析"],
+            icons=["table", "tools", "bar-chart", "graph-up", "gear-fill"],
+            menu_icon="cast",
+            default_index=0,
+        )
+    
+    # 主内容区
+    if selected == "数据概览":
+        data_overview()
+    elif selected == "数据清洗":
+        data_cleaning()
+    elif selected == "数据分析":
+        data_analysis()
+    elif selected == "可视化":
+        data_visualization()
+    elif selected == "高级分析":
+        advanced_analysis()
+
+def data_overview():
+    st.title("数据概览")
     uploaded_file = st.file_uploader("选择文件", type=["csv", "xlsx", "xls", "json"])
     
     if uploaded_file is not None:
         data = read_file(uploaded_file)
         if data is not None:
-            st.write("文件读取成功")
-            st.write(data.head())
+            st.success("文件读取成功")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("行数", data.shape[0])
+            with col2:
+                st.metric("列数", data.shape[1])
+            with col3:
+                st.metric("缺失值数", data.isnull().sum().sum())
+            
+            style_metric_cards()
+            
+            st.subheader("数据预览")
+            st.dataframe(data.head())
+            
+            st.subheader("数据类型")
+            st.dataframe(data.dtypes)
+            
+            st.session_state['data'] = data
 
-            # 数据过滤
-            st.subheader("数据过滤")
-            columns_to_filter = st.multiselect("选择要过滤的列", data.columns)
-            if columns_to_filter:
-                for column in columns_to_filter:
-                    unique_values = data[column].unique()
-                    selected_values = st.multiselect(f"选择 {column} 的值", unique_values)
-                    if selected_values:
-                        data = data[data[column].isin(selected_values)]
-            
-            st.write("过滤后的数据：")
-            st.write(data)
+def data_cleaning():
+    st.title("数据清洗")
+    if 'data' not in st.session_state:
+        st.warning("请先在数据概览页面上传数据")
+        return
+    
+    data = st.session_state['data']
+    
+    st.subheader("删除重复行")
+    if st.button("删除重复行"):
+        original_rows = data.shape[0]
+        data = data.drop_duplicates()
+        st.success(f"删除了 {original_rows - data.shape[0]} 行重复数据")
+    
+    st.subheader("处理缺失值")
+    missing_columns = data.columns[data.isnull().any()].tolist()
+    for column in missing_columns:
+        method = st.selectbox(f"选择处理 {column} 缺失值的方法", ["保持不变", "删除", "填充平均值", "填充中位数", "填充众数"])
+        if method == "删除":
+            data = data.dropna(subset=[column])
+        elif method == "填充平均值":
+            data[column].fillna(data[column].mean(), inplace=True)
+        elif method == "填充中位数":
+            data[column].fillna(data[column].median(), inplace=True)
+        elif method == "填充众数":
+            data[column].fillna(data[column].mode()[0], inplace=True)
+    
+    st.session_state['data'] = data
+    st.success("数据清洗完成")
 
-            # 添加数据清洗功能
-            st.subheader("数据清洗")
-            if st.checkbox("删除重复行"):
-                data = data.drop_duplicates()
-                st.write(f"删除了 {len(data) - len(data.drop_duplicates())} 行重复数据")
-            
-            if st.checkbox("处理缺失值"):
-                missing_columns = data.columns[data.isnull().any()].tolist()
-                for column in missing_columns:
-                    method = st.selectbox(f"选择处理 {column} 缺失值的方法", ["删除", "填充平均值", "填充中位数", "填充众数"])
-                    if method == "删除":
-                        data = data.dropna(subset=[column])
-                    elif method == "填充平均值":
-                        data[column].fillna(data[column].mean(), inplace=True)
-                    elif method == "填充中位数":
-                        data[column].fillna(data[column].median(), inplace=True)
-                    elif method == "填充众数":
-                        data[column].fillna(data[column].mode()[0], inplace=True)
-            
-            st.write("清洗后的数据：")
-            st.write(data)
+def data_analysis():
+    st.title("数据分析")
+    if 'data' not in st.session_state:
+        st.warning("请先在数据概览页面上传数据")
+        return
+    
+    data = st.session_state['data']
+    
+    st.subheader("描述性统计")
+    st.dataframe(data.describe())
+    
+    st.subheader("相关性分析")
+    numeric_columns = data.select_dtypes(include=['float64', 'int64']).columns
+    corr_matrix = data[numeric_columns].corr()
+    fig = px.imshow(corr_matrix, text_auto=True, aspect="auto")
+    st.plotly_chart(fig, use_container_width=True)
 
-            # 数据分析
-            st.subheader("数据分析")
-            st.write(f"数据集包含 {data.shape[0]} 行和 {data.shape[1]} 列")
-            st.write("数据类型：")
-            st.write(data.dtypes)
+def data_visualization():
+    st.title("数据可视化")
+    if 'data' not in st.session_state:
+        st.warning("请先在数据概览页面上传数据")
+        return
+    
+    data = st.session_state['data']
+    
+    chart_type = st.selectbox("选择图表类型", ["散点图", "线图", "柱状图", "箱线图", "直方图", "饼图"])
+    
+    numeric_columns = data.select_dtypes(include=['float64', 'int64']).columns
+    categorical_columns = data.select_dtypes(include=['object']).columns
+    
+    if chart_type in ["散点图", "线图", "柱状图"]:
+        x_column = st.selectbox("选择X轴", data.columns)
+        y_column = st.selectbox("选择Y轴", numeric_columns)
+        color_column = st.selectbox("选择颜色列（可选）", ["无"] + list(categorical_columns))
+        
+        if chart_type == "散点图":
+            fig = px.scatter(data, x=x_column, y=y_column, color=color_column if color_column != "无" else None)
+        elif chart_type == "线图":
+            fig = px.line(data, x=x_column, y=y_column, color=color_column if color_column != "无" else None)
+        else:  # 柱状图
+            fig = px.bar(data, x=x_column, y=y_column, color=color_column if color_column != "无" else None)
+    
+    elif chart_type in ["箱线图", "直方图"]:
+        column = st.selectbox("选择列", numeric_columns)
+        if chart_type == "箱线图":
+            fig = px.box(data, y=column)
+        else:  # 直方图
+            fig = px.histogram(data, x=column)
+    
+    else:  # 饼图
+        column = st.selectbox("选择列", categorical_columns)
+        fig = px.pie(data, names=column, values=data[column].value_counts())
+    
+    st.plotly_chart(fig, use_container_width=True)
 
-            # 描述性统计
-            st.subheader("描述性统计")
-            st.write(data.describe())
-
-            # 数据可视化
-            st.subheader("数据可视化")
-            numeric_columns = data.select_dtypes(include=['float64', 'int64']).columns
-            categorical_columns = data.select_dtypes(include=['object']).columns
-            
-            chart_type = st.selectbox("选择图表类型", ["直方图", "箱线图", "散点图", "折线图", "条形图", "饼图", "热力图"])
-            
-            column_to_plot = None
-            x_column = None
-            y_column = None
-
-            if chart_type in ["直方图", "箱线图", "折线图", "条形图"]:
-                column_to_plot = st.selectbox("选择要可视化的列", numeric_columns)
-            elif chart_type == "散点图":
-                x_column = st.selectbox("选择X轴", numeric_columns)
-                y_column = st.selectbox("选择Y轴", numeric_columns)
-            elif chart_type == "饼图":
-                column_to_plot = st.selectbox("选择要可视化的列", categorical_columns)
-            elif chart_type == "热力图":
-                st.write("热力图将使用所有数值列")
-            
-            fig, ax = plt.subplots(figsize=(10, 6))
-            
-            if chart_type == "直方图":
-                sns.histplot(data[column_to_plot], kde=True, ax=ax)
-            elif chart_type == "箱线图":
-                sns.boxplot(y=data[column_to_plot], ax=ax)
-            elif chart_type == "散点图":
-                sns.scatterplot(x=data[x_column], y=data[y_column], ax=ax)
-            elif chart_type == "折线图":
-                data[column_to_plot].plot(ax=ax)
-            elif chart_type == "条形图":
-                data[column_to_plot].value_counts().plot(kind='bar', ax=ax)
-            elif chart_type == "饼图":
-                data[column_to_plot].value_counts().plot(kind='pie', autopct='%1.1f%%', ax=ax)
-            elif chart_type == "热力图":
-                sns.heatmap(data[numeric_columns].corr(), annot=True, cmap='coolwarm', ax=ax)
-            
-            plt.title(f"{chart_type}")
-            if chart_type == "散点图":
-                ax.set_xlabel(x_column)
-                ax.set_ylabel(y_column)
-            elif chart_type != "饼图" and chart_type != "热力图":
-                ax.set_xlabel(column_to_plot)
-                ax.set_ylabel("频率" if chart_type == "直方图" else column_to_plot)
-            plt.xticks(rotation=45)
-            st.pyplot(fig)
-
-            # 相关性分析
-            st.subheader("相关性分析")
-            corr_matrix = data[numeric_columns].corr()
-            fig, ax = plt.subplots(figsize=(10, 8))
-            sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', ax=ax)
-            plt.title("相关性热图")
-            st.pyplot(fig)
-
-            # 高级数据分析
-            st.subheader("高级数据分析")
-            if st.checkbox("执行假设检验"):
-                column1 = st.selectbox("选择第一个列", numeric_columns)
-                column2 = st.selectbox("选择第二个列", numeric_columns)
-                
-                t_statistic, p_value = stats.ttest_ind(data[column1], data[column2])
-                st.write(f"T检验结果：t统计量 = {t_statistic:.4f}, p值 = {p_value:.4f}")
-                
-                if p_value < 0.05:
-                    st.write("在0.05显著性水平下，两列数据存在显著差异。")
-                else:
-                    st.write("在0.05显著性水平下，两列数据不存在显著差异。")
-
-            # 数据分组和聚合功能
-            st.subheader("数据分组和聚合")
-            group_column = st.selectbox("选择分组列", data.columns)
-            agg_column = st.selectbox("选择聚合列", numeric_columns)
-            agg_function = st.selectbox("选择聚合函数", ["平均值", "总和", "最大值", "最小值"])
-            
-            agg_dict = {"平均值": "mean", "总和": "sum", "最大值": "max", "最小值": "min"}
-            grouped_data = data.groupby(group_column)[agg_column].agg(agg_dict[agg_function]).reset_index()
-            
-            st.write("分组聚合结果：")
-            st.write(grouped_data)
-            
-            # 可视化分组结果
-            fig, ax = plt.subplots(figsize=(10, 6))
-            sns.barplot(x=group_column, y=agg_column, data=grouped_data, ax=ax)
-            plt.title(f"{group_column} 分组的 {agg_column} {agg_function}")
-            plt.xticks(rotation=45)
-            st.pyplot(fig)
-
-            # 数据导出
-            st.subheader("数据导出")
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                data.to_excel(writer, sheet_name='Sheet1', index=False)
-            output.seek(0)
-            st.download_button(
-                label="下载处理后的数据为Excel文件",
-                data=output,
-                file_name="processed_data.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+def advanced_analysis():
+    st.title("高级分析")
+    if 'data' not in st.session_state:
+        st.warning("请先在数据概览页面上传数据")
+        return
+    
+    data = st.session_state['data']
+    
+    st.subheader("数据分组和聚合")
+    group_column = st.selectbox("选择分组列", data.columns)
+    agg_column = st.selectbox("选择聚合列", data.select_dtypes(include=['float64', 'int64']).columns)
+    agg_function = st.selectbox("选择聚合函数", ["平均值", "总和", "最大值", "最小值"])
+    
+    agg_dict = {"平均值": "mean", "总和": "sum", "最大值": "max", "最小值": "min"}
+    grouped_data = data.groupby(group_column)[agg_column].agg(agg_dict[agg_function]).reset_index()
+    
+    st.write("分组聚合结果：")
+    st.dataframe(grouped_data)
+    
+    fig = px.bar(grouped_data, x=group_column, y=agg_column, title=f"{group_column} 分组的 {agg_column} {agg_function}")
+    st.plotly_chart(fig, use_container_width=True)
 
 if __name__ == '__main__':
     main()

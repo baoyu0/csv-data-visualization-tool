@@ -1,0 +1,62 @@
+/* 全局样式 */
+body {
+    font-family: 'Roboto', sans-serif;
+    background-color: #f0f2f6;
+}
+
+/* 标题样式 */
+h1, h2, h3 {
+    color: #262730;
+}
+
+/* 卡片样式 */
+.card {
+    background-color: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    margin-bottom: 20px;
+    transition: all 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* 按钮样式 */
+.stButton > button {
+    background-color: #F63366;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 10px 20px;
+    font-weight: bold;
+    transition: all 0.3s ease;
+}
+
+.stButton > button:hover {
+    background-color: #D62F5E;
+    transform: translateY(-2px);
+}
+
+/* 输入框样式 */
+.stTextInput > div > div > input {
+    border-radius: 5px;
+}
+
+/* 选择框样式 */
+.stSelectbox > div > div > select {
+    border-radius: 5px;
+}
+
+/* 侧边栏样式 */
+.css-1d391kg {
+    padding-top: 3rem;
+}
+
+/* 数据框样式 */
+.stDataFrame {
+    border: 1px solid #e6e6e6;
+    border-radius: 5px;
+}
