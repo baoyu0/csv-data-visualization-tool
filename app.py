@@ -15,6 +15,9 @@ import json
 import plotly
 import plotly.io as pio
 from plotly.colors import n_colors
+from statsmodels.tsa.seasonal import seasonal_decompose
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 
 # 设置中文字体
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']  # 指定默认字体为微软雅黑
@@ -272,7 +275,10 @@ def data_visualization():
         if chart_type == "箱线图":
             fig = px.box(data, y=column, color_discrete_sequence=color_scheme)
         else:  # 直方图
-            fig = px.histogram(data, x=column, color_discrete_sequence=color_scheme)
+            fig = px.histogram(data, x=column, nbins=30, marginal="box", 
+                               color_discrete_sequence=color_scheme)
+            fig.update_traces(opacity=0.75)
+            fig.update_layout(bargap=0.1)
     
     elif chart_type == "饼图":
         if len(categorical_columns) == 0:
@@ -288,7 +294,19 @@ def data_visualization():
             st.warning("数据集中数值列不足两列，无法创建热力图。")
             return
         corr_matrix = data[numeric_columns].corr()
-        fig = px.imshow(corr_matrix, text_auto=True, aspect="auto", color_continuous_scale='Viridis', zmin=-1, zmax=1, labels=dict(color="相关系数"))
+        fig = px.imshow(corr_matrix, 
+                        text_auto=True, 
+                        aspect="auto", 
+                        color_continuous_scale='RdBu_r',  # 使用红蓝色阶
+                        zmin=-1, 
+                        zmax=1,
+                        labels=dict(color="相关系数"))
+        fig.update_traces(text=corr_matrix.round(2), texttemplate="%{text}")
+        fig.update_layout(coloraxis_colorbar=dict(
+            title="相关系数",
+            tickvals=[-1, -0.5, 0, 0.5, 1],
+            ticktext=["-1", "-0.5", "0", "0.5", "1"]
+        ))
     
     # 更新图表布局
     fig.update_layout(
